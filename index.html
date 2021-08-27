@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+  <script src="https://cdn.bootcdn.net/ajax/libs/vue/2.6.14/vue.js"></script>
+  <script src="https://cdn.bootcdn.net/ajax/libs/adapterjs/0.15.5/adapter.min.js"></script>
+  <style>
+    .remote-video:not(:last-child) {
+      margin-right: 16px;
+      margin-bottom: 16px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app">
+    <div>
+      <div>local tracks</div>
+      <video ref="local-video" controls="true" height="240" width="320"></video>
+    </div>
+    <div>
+      <div>remote tracks</div>
+      <video class="remote-video" v-for="remoteUser in remoteUsers" :key="remoteUser.username"
+        :id="`remote-video-${remoteUser.username}`" controls="true" height="240" width="320"></video>
+    </div>
+    <div>
+      <div>
+        <label for="username">username</label>
+        <input name="username" type="text" v-model="username">
+      </div>
+      <div>
+        <label for="channel">channel</label>
+        <input name="channel" type="text" v-model="channel">
+      </div>
+      <button @click="onClickJoin">join</button>
+      <button @click="onClickLeave">leave</button>
+    </div>
+  </div>
+  <script>
+    const ACTIONS = {
+      JOIN: 'join',
+      LEAVE: 'leave',
+      CALL: 'call',
+      ANSWER: 'answer'
+    }
+    const app = new Vue({
+      data() {
+        return {
+          username: '',
+          channel: '',
+          ws: null,
+          localStream: null,
+          rtcReady: false,
+          remoteUsers: []
+        }
+      },
+      mounted() {
+        this.ws = new WebSocket('ws://127.0.0.1:9000')
+        this.ws.onmessage = (ws) => {
+          console.log(ws.data)
+          const message = JSON.parse(ws.data)
+          if (message.action === 'user-join') {
+            this.onRemoteUserJoinChannel(message.data)
+          }
+          if (message.action === 'user-leave') {
+            this.onRemoteUserLeaveChannel(message.data)
+          }
+          if (message.action === 'call-response') {
+            this.onRemoteUserCallLocal(message.data)
+          }
+        }
+        AdapterJS.webRTCReady(() => {
+          this.rtcReady = true
+          this.getLocalStream()
+        })
+      },
+      methods: {
+        getLocalStream() {
+          getUserMedia(
+            {
+              audio: true,
+              video: {
+                width: 320,
+                height: 240
+              }
+            },
+            (stream) => {
+              this.localStream = stream
+              this.$refs['local-video'].srcObject = stream
+            },
+            () => {
+              alert('unable to get local stream')
+            }
+          )
+        },
+        detectWsState() {
+          if (this.ws && this.ws.readyState === 1) {
+            return true
+          }
+          alert('did not connect to signal server')
+          return false
+        },
+        joinChannel() {
+          const { detectWsState, channel, username } = this
+          if (detectWsState() && channel && username) {
+            const message = {
+              action: ACTIONS.JOIN,
+              data: {
+                channel,
+                username
+              }
+            }
+            this.ws.send(JSON.stringify(message))
+          }
+        },
+        leaveChannel() {
+          const { detectWsState, channel, username } = this
+          if (detectWsState() && channel && username) {
+            const message = {
+              action: ACTIONS.LEAVE,
+              data: {
+                channel,
+                username
+              }
+            }
+            this.ws.send(JSON.stringify(message))
+          }
+        },
+        async remoteUserJoinChannel(username) {
+          const peerConnection = new RTCPeerConnection()
+          const offer = await peerConnection.createOffer()
+          const sdp = new RTCSessionDescription(offer)
+          await peerConnection.setLocalDescription(sdp)
+          this.remoteUsers.push({ username, peerConnection })
+          this.ws.send(JSON.stringify({
+            action: ACTIONS.CALL,
+            data: {
+              offer,
+              to: username,
+              channel: this.channel,
+              from: this.username
+            }
+          }))
+          this.$nextTick(() => {
+            this.addTrackListenderToPeerConnection(peerConnection, username)
+          })
+        },
+        async remoteUserCallLocal(data) {
+          const { from, offer } = data
+          const { localStream } = this
+          const peerConnection = new RTCPeerConnection()
+          const remoteSDP = new RTCSessionDescription(offer)
+          await peerConnection.setRemoteDescription(remoteSDP)
+          const answer = await peerConnection.createAnswer()
+          const localSDP = new RTCSessionDescription(answer)
+          await peerConnection.setLocalDescription(localSDP)
+          this.remoteUsers.push({ username: from, peerConnection })
+          this.ws.send(JSON.stringify({
+            action: ACTIONS.ANSWER,
+            data: {
+              answer,
+              to: from,
+              channel: this.channel,
+              from: this.username
+            }
+          }))
+          peerConnection.addStream(localStream)
+          this.$nextTick(() => {
+            this.addTrackListenderToPeerConnection(peerConnection, from)
+          })
+        },
+        async remoteUserAnswerCall(data) {
+          const { from, answer } = data
+          const { localStream, remoteUsers } = this
+          const [targetUser] = remoteUsers.filter(({ username }) => username === data.from)
+          if (targetUser) {
+            const remoteSDP = new RTCSessionDescription(answer)
+            await targetUser.peerConnection.setRemoteDescription(remoteSDP)
+            targetUser.peerConnection.addStream(localStream)
+          }
+        },
+        addTrackListenderToPeerConnection(peerConnection, username) {
+          peerConnection.onaddstream = ({ stream }) => {
+            console.log('onstream')
+            const remoteVideo = document.getElementById("remote-video-" + username);
+            if (remoteVideo) {
+              remoteVideo.srcObject = stream;
+            }
+          }
+        },
+        async remoteUserLeaveChannel(username) {
+          // TODO
+        },
+        onClickJoin() {
+          this.joinChannel()
+        },
+        onClickLeave() {
+          this.leaveChannel()
+        },
+        onRemoteUserJoinChannel(username) {
+          this.remoteUserJoinChannel(username)
+        },
+        onRemoteUserLeaveChannel(username) {
+          this.remoteUserLeaveChannel(username)
+        },
+        onRemoteUserCallLocal(data) {
+          this.remoteUserCallLocal(data)
+        },
+        onRemoteUserAnswerCall(data) {
+          this.remoteUserAnswerCall(data)
+        }
+      }
+    })
+    app.$mount('#app')
+  </script>
+</body>
+
+</html>
