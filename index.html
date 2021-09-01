@@ -45,7 +45,8 @@
       JOIN: 'join',
       LEAVE: 'leave',
       CALL: 'call',
-      ANSWER: 'answer'
+      ANSWER: 'answer',
+      ICE: 'ice'
     }
     const app = new Vue({
       data() {
@@ -54,27 +55,31 @@
           channel: '',
           ws: null,
           localStream: null,
-          rtcReady: false,
           remoteUsers: []
         }
       },
       mounted() {
         this.ws = new WebSocket('ws://127.0.0.1:9000')
-        this.ws.onmessage = (ws) => {
+        this.ws.onmessage = async (ws) => {
           console.log(ws.data)
           const message = JSON.parse(ws.data)
           if (message.action === 'user-join') {
-            this.onRemoteUserJoinChannel(message.data)
+            await this.onRemoteUserJoinChannel(message.data)
           }
           if (message.action === 'user-leave') {
-            this.onRemoteUserLeaveChannel(message.data)
+            await this.onRemoteUserLeaveChannel(message.data)
           }
           if (message.action === 'call-response') {
-            this.onRemoteUserCallLocal(message.data)
+            await this.onRemoteUserCallLocal(message.data)
+          }
+          if (message.action === 'answer-response') {
+            await this.onRemoteUserAnswerCall(message.data)
+          }
+          if (message.action === 'receive-ice') {
+            await this.onRemoteUserSendIce(message.data)
           }
         }
         AdapterJS.webRTCReady(() => {
-          this.rtcReady = true
           this.getLocalStream()
         })
       },
@@ -131,11 +136,40 @@
           }
         },
         async remoteUserJoinChannel(username) {
-          const peerConnection = new RTCPeerConnection()
+          const remoteUser = { username }
+          const peerConnection = new RTCPeerConnection({
+            iceServers: [
+              {
+                url: 'stun:stun.l.google.com:19302'
+              }
+            ]
+          })
+          peerConnection.addEventListener('icecandidate', (event) => {
+            this.ws.send(JSON.stringify({
+              action: ACTIONS.ICE,
+              data: {
+                ice: event.candidate,
+                to: username,
+                channel: this.channel,
+                from: this.username
+              }
+            }))
+          })
+          peerConnection.addEventListener('connectionstatechange', (event) => {
+            if (peerConnection.connectionState === 'connected') {
+              document.getElementById('remote-video-' + username).srcObject = remoteUser.streams[0]
+            }
+          })
+          peerConnection.addEventListener('track', (event) => {
+            console.log(event)
+            remoteUser.streams = event.streams
+          })
+          remoteUser.peerConnection = peerConnection
+          this.localStream.getTracks().forEach(track => peerConnection.addTrack(track, this.localStream));
           const offer = await peerConnection.createOffer()
           const sdp = new RTCSessionDescription(offer)
           await peerConnection.setLocalDescription(sdp)
-          this.remoteUsers.push({ username, peerConnection })
+          this.remoteUsers.push(remoteUser)
           this.ws.send(JSON.stringify({
             action: ACTIONS.CALL,
             data: {
@@ -145,20 +179,47 @@
               from: this.username
             }
           }))
-          this.$nextTick(() => {
-            this.addTrackListenderToPeerConnection(peerConnection, username)
-          })
         },
         async remoteUserCallLocal(data) {
           const { from, offer } = data
           const { localStream } = this
-          const peerConnection = new RTCPeerConnection()
+          const remoteUser = { username: from }
+          const peerConnection = new RTCPeerConnection({
+            iceServers: [
+              {
+                url: 'stun:stun.l.google.com:19302'
+              }
+            ]
+          })
+          peerConnection.addEventListener('icecandidate', (event) => {
+            this.ws.send(JSON.stringify({
+              action: ACTIONS.ICE,
+              data: {
+                ice: event.candidate,
+                to: from,
+                channel: this.channel,
+                from: this.username
+              }
+            }))
+          })
+          peerConnection.addEventListener('connectionstatechange', (event) => {
+            console.log(event)
+            if (peerConnection.connectionState === 'connected') {
+              document.getElementById('remote-video-' + from).srcObject = remoteUser.streams[0]
+            }
+          })
+          peerConnection.addEventListener('track', (event) => {
+            console.log(event)
+            remoteUser.streams = event.streams
+          })
+          remoteUser.peerConnection = peerConnection
+          this.localStream.getTracks().forEach(track => peerConnection.addTrack(track, this.localStream));
           const remoteSDP = new RTCSessionDescription(offer)
           await peerConnection.setRemoteDescription(remoteSDP)
           const answer = await peerConnection.createAnswer()
           const localSDP = new RTCSessionDescription(answer)
           await peerConnection.setLocalDescription(localSDP)
-          this.remoteUsers.push({ username: from, peerConnection })
+          this.remoteUsers.push(remoteUser)
           this.ws.send(JSON.stringify({
             action: ACTIONS.ANSWER,
             data: {
@@ -168,10 +229,6 @@
               from: this.username
             }
           }))
-          peerConnection.addStream(localStream)
-          this.$nextTick(() => {
-            this.addTrackListenderToPeerConnection(peerConnection, from)
-          })
         },
         async remoteUserAnswerCall(data) {
           const { from, answer } = data
@@ -180,15 +237,15 @@
           if (targetUser) {
             const remoteSDP = new RTCSessionDescription(answer)
             await targetUser.peerConnection.setRemoteDescription(remoteSDP)
-            targetUser.peerConnection.addStream(localStream)
           }
         },
-        addTrackListenderToPeerConnection(peerConnection, username) {
-          peerConnection.onaddstream = ({ stream }) => {
-            console.log('onstream')
-            const remoteVideo = document.getElementById("remote-video-" + username);
-            if (remoteVideo) {
-              remoteVideo.srcObject = stream;
+        async remoteUserSendIce(data) {
+          const { from, ice } = data
+          const { localStream, remoteUsers } = this
+          const [targetUser] = remoteUsers.filter(({ username }) => username === data.from)
+          if (targetUser) {
+            if (ice) {
+              targetUser.peerConnection.addIceCandidate(ice)
             }
           }
         },
@@ -201,17 +258,20 @@
         onClickLeave() {
           this.leaveChannel()
         },
-        onRemoteUserJoinChannel(username) {
-          this.remoteUserJoinChannel(username)
+        async onRemoteUserJoinChannel(username) {
+          await this.remoteUserJoinChannel(username)
         },
-        onRemoteUserLeaveChannel(username) {
-          this.remoteUserLeaveChannel(username)
+        async onRemoteUserLeaveChannel(username) {
+          await this.remoteUserLeaveChannel(username)
         },
-        onRemoteUserCallLocal(data) {
-          this.remoteUserCallLocal(data)
+        async onRemoteUserCallLocal(data) {
+          await this.remoteUserCallLocal(data)
         },
-        onRemoteUserAnswerCall(data) {
-          this.remoteUserAnswerCall(data)
+        async onRemoteUserAnswerCall(data) {
+          await this.remoteUserAnswerCall(data)
+        },
+        async onRemoteUserSendIce(data) {
+          await this.remoteUserSendIce(data)
         }
       }
     })

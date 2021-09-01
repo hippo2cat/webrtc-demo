@@ -82,6 +82,16 @@ interface CallRequest {
   }
 }
 
+interface IceRequest {
+  action: 'ice',
+  data: {
+    ice: any,
+    to: string,
+    channel: string,
+    from: string
+  }
+}
+
 interface CallResponse {
   action: 'call-response',
   data: {
@@ -108,7 +118,15 @@ interface AnswerResponse {
   }
 }
 
-type WSMessage = JoinRequest | LeaveRequest | CallRequest | AnswerRequest
+interface IceResponse {
+  action: 'receive-ice',
+  data: {
+    ice: any,
+    from: string
+  }
+}
+
+type WSMessage = JoinRequest | LeaveRequest | CallRequest | AnswerRequest | IceRequest
 
 const channels: Channel[] = []
 
@@ -130,6 +148,9 @@ wss.on('connection', (ws) => {
     }
     if (message.action === 'answer') {
       answerChannelHandler(message)
+    }
+    if (message.action === 'ice') {
+      iceHandler(message)
     }
   })
 })
@@ -204,6 +225,24 @@ function answerChannelHandler(message: AnswerRequest) {
         }
       }
       targetUser.connection.send(JSON.stringify(answerResponse))
+    }
+  }
+}
+
+function iceHandler(message: IceRequest) {
+  const { to, ice, channel, from } = message.data
+  const [targetChannel] = channels.filter(({ name }) => name === channel)
+  if (targetChannel) {
+    const [targetUser] = targetChannel.users.filter(({ name }) => name === to)
+    if (targetUser) {
+      const iceResponse: IceResponse = {
+        action: 'receive-ice',
+        data: {
+          ice,
+          from
+        }
+      }
+      targetUser.connection.send(JSON.stringify(iceResponse))
     }
   }
 }
