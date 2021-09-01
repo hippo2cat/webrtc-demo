@@ -1,4 +1,7 @@
 import WebSocket, { Server } from 'ws'
+import { createServer } from 'https'
+import { readFileSync } from 'fs'
+import path from 'path'
 
 class User {
   readonly name: string;
@@ -130,9 +133,16 @@ type WSMessage = JoinRequest | LeaveRequest | CallRequest | AnswerRequest | IceR
 
 const channels: Channel[] = []
 
-const wss = new Server({
-  port: 9000
+const server = createServer({
+  cert: readFileSync(path.join(__dirname, './server.crt')),
+  key: readFileSync(path.join(__dirname, './ca.key')),
 })
+
+const wss = new Server({
+  server
+})
+
+server.listen(9000)
 
 wss.on('connection', (ws) => {
   ws.on('message', (messageStr) => {

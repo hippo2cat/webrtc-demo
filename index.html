@@ -59,7 +59,7 @@
         }
       },
       mounted() {
-        this.ws = new WebSocket('ws://10.15.0.141:9000')
+        this.ws = new WebSocket('wss://10.15.0.141:9000')
         this.ws.onmessage = async (ws) => {
           console.log(ws.data)
           const message = JSON.parse(ws.data)
@@ -140,7 +140,7 @@
           const peerConnection = new RTCPeerConnection({
             iceServers: [
               {
-                url: 'stun:stun.l.google.com:19302'
+                url: 'stun:stun.counterpath.net'
               }
             ]
           })
@@ -187,7 +187,7 @@
           const peerConnection = new RTCPeerConnection({
             iceServers: [
               {
-                url: 'stun:stun.l.google.com:19302'
+                url: 'stun:stun.counterpath.net'
               }
             ]
           })
