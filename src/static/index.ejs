@@ -59,7 +59,7 @@
         }
       },
       mounted() {
-        this.ws = new WebSocket('wss://10.15.0.141:9000')
+        this.ws = new WebSocket('wss://' + '<%=host%>' + ':9000')
         this.ws.onmessage = async (ws) => {
           console.log(ws.data)
           const message = JSON.parse(ws.data)
