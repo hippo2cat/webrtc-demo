@@ -1,8 +1,7 @@
-import WebSocket, { Server } from 'ws'
 import { createServer } from 'https'
 import { readFileSync } from 'fs'
+import WebSocket, { Server } from 'ws'
 import path from 'path'
-import ejs from 'ejs'
 
 class User {
   readonly name: string;
@@ -134,15 +133,6 @@ type WSMessage = JoinRequest | LeaveRequest | CallRequest | AnswerRequest | IceR
 
 const channels: Channel[] = []
 
-const httpServer = createServer({
-  cert: readFileSync(path.join(__dirname, './server.crt')),
-  key: readFileSync(path.join(__dirname, './ca.key')),
-}, (req, res) => {
-  const content = readFileSync(path.join(__dirname, './static/index.ejs'), { encoding: 'utf-8' })
-  res.writeHead(200, { 'Content-Type': 'text/html' })
-  res.end(ejs.render(content, { host: req.headers.host }))
-})
-
 const wsServer = createServer({
   cert: readFileSync(path.join(__dirname, './server.crt')),
   key: readFileSync(path.join(__dirname, './ca.key')),
@@ -151,10 +141,6 @@ const wsServer = createServer({
 const wss = new Server({
   server: wsServer
 })
-
-wsServer.listen(9000)
-
-httpServer.listen(443)
 
 wss.on('connection', (ws) => {
   ws.on('message', (messageStr) => {
@@ -268,3 +254,5 @@ function iceHandler(message: IceRequest) {
     }
   }
 }
+
+export default wsServer
