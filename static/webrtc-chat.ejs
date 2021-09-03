@@ -6,9 +6,13 @@
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Document</title>
-  <script src="https://cdn.bootcdn.net/ajax/libs/vue/2.6.14/vue.js"></script>
-  <script src="https://cdn.bootcdn.net/ajax/libs/adapterjs/0.15.5/adapter.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/adapterjs@0.15.5/publish/adapter.min.js"></script>
   <style>
+    * {
+      box-sizing: border-box;
+    }
+
     .remote-video:not(:last-child) {
       margin-right: 16px;
       margin-bottom: 16px;
@@ -20,12 +24,7 @@
   <div id="app">
     <div>
       <div>local tracks</div>
-      <video ref="local-video" controls="true" height="240" width="320"></video>
-    </div>
-    <div>
-      <div>remote tracks</div>
-      <video class="remote-video" v-for="remoteUser in remoteUsers" :key="remoteUser.username"
-        :id="`remote-video-${remoteUser.username}`" controls="true" height="240" width="320"></video>
+      <video ref="local-video" controls="true" height="240" width="320" autoplay></video>
     </div>
     <div>
       <div>
@@ -38,6 +37,13 @@
       </div>
       <button @click="onClickJoin">join</button>
       <button @click="onClickLeave">leave</button>
+    </div>
+    <div>
+      <div>remote tracks</div>
+      <div class="remote-video" v-for="remoteUser in remoteUsers" :key="remoteUser.username">
+        <video :id="`remote-video-${remoteUser.username}`" controls="true" height="240" width="320" autoplay></video>
+        <div>{{ remoteUser.username }}</div>
+      </div>
     </div>
   </div>
   <script>
